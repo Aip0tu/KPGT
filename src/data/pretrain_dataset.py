@@ -5,6 +5,7 @@ import scipy.sparse as sps
 import torch
 import dgl.backend as F
 class MoleculeDataset(Dataset):
+    """预训练数据集，只提供 SMILES、指纹和分子描述符。"""
     def __init__(self, root_path):
         smiles_path = os.path.join(root_path, "smiles.smi")
         fp_path = os.path.join(root_path, "rdkfp1-7_512.npz")
@@ -27,6 +28,7 @@ class MoleculeDataset(Dataset):
         return self.smiles_list[idx], self.fps[idx], self.mds[idx]
 
     def task_pos_weights(self):
+        """为指纹恢复任务计算每一位的类别不平衡权重。"""
         task_pos_weights = torch.ones(self.fps.shape[1])
         num_pos = torch.sum(torch.nan_to_num(self.fps,nan=0), axis=0)
         masks = F.zerocopy_from_numpy(

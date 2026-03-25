@@ -20,6 +20,7 @@ from src.model_config import config_dict
 import warnings
 warnings.filterwarnings("ignore")
 def init_params(module):
+    """初始化线性层与嵌入层参数。"""
     if isinstance(module, nn.Linear):
         module.weight.data.normal_(mean=0.0, std=0.02)
         if module.bias is not None:
@@ -27,10 +28,12 @@ def init_params(module):
     if isinstance(module, nn.Embedding):
         module.weight.data.normal_(mean=0.0, std=0.02)
 def seed_worker(worker_id):
+    """为 DataLoader worker 设置随机种子。"""
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 def parse_args():
+    """解析评估脚本的命令行参数。"""
     parser = argparse.ArgumentParser(description="Arguments for training LiGhT")
     parser.add_argument("--seed", type=int, default=22)
     parser.add_argument("--n_epochs", type=int, default=50)
@@ -48,6 +51,7 @@ def parse_args():
     return args
 
 def get_predictor(d_input_feats, n_tasks, n_layers, predictor_drop, device, d_hidden_feats=None):
+    """构建下游任务预测头。"""
     if n_layers == 1:
         predictor = nn.Linear(d_input_feats, n_tasks)
     else:
@@ -64,6 +68,7 @@ def get_predictor(d_input_feats, n_tasks, n_layers, predictor_drop, device, d_hi
     predictor.apply(lambda module: init_params(module))
     return predictor.to(device)
 def finetune(args):
+    """加载模型并在训练/验证/测试集上做离线评估。"""
     config = config_dict[args.config]
     vocab = Vocab(N_ATOM_TYPES, N_BOND_TYPES)
     g = torch.Generator()
@@ -76,7 +81,7 @@ def finetune(args):
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False, num_workers=args.n_threads, worker_init_fn=seed_worker, generator=g, drop_last=False, collate_fn=collator)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=args.n_threads, worker_init_fn=seed_worker, generator=g, drop_last=False, collate_fn=collator)
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers=args.n_threads, worker_init_fn=seed_worker, generator=g, drop_last=False, collate_fn=collator)
-    # Model Initialization
+    # 初始化 LiGhT 主干网络。
     model = LiGhT(
         d_node_feats=config['d_node_feats'],
         d_edge_feats=config['d_edge_feats'],
@@ -93,7 +98,7 @@ def finetune(args):
         feat_drop=0,
         n_node_types=vocab.vocab_size
     ).to(device)
-    # Finetuning Setting
+    # 挂载下游预测头并加载训练好的权重。
     model.predictor = get_predictor(d_input_feats=config['d_g_feats']*3, n_tasks=train_dataset.n_tasks, n_layers=2, predictor_drop=0, device=device, d_hidden_feats=256)
     model.load_state_dict({k.replace('module.',''):v for k,v in torch.load(f'{args.model_path}').items()})
     del model.md_predictor

@@ -9,13 +9,14 @@ import scipy.sparse as sps
 
 SPLIT_TO_ID = {'train':0, 'val':1, 'test':2}
 class MoleculeDataset(Dataset):
+    """下游任务数据集，读取缓存图、分子指纹、描述符和标签。"""
     def __init__(self, root_path, dataset, dataset_type, path_length=5, n_virtual_nodes=2, split_name=None, split=None):
         dataset_path = os.path.join(root_path, f"{dataset}/{dataset}.csv")
         self.cache_path = os.path.join(root_path, f"{dataset}/{dataset}_{path_length}.pkl")
         split_path = os.path.join(root_path, f"{dataset}/splits/{split_name}.npy")
         ecfp_path = os.path.join(root_path, f"{dataset}/rdkfp1-7_512.npz")
         md_path = os.path.join(root_path, f"{dataset}/molecular_descriptors.npz")
-        # Load Data
+        # 读取表格、划分索引、指纹和分子描述符。
         df = pd.read_csv(dataset_path)
         if split is not None:
             use_idxs = np.load(split_path, allow_pickle=True)[SPLIT_TO_ID[split]]
@@ -27,7 +28,7 @@ class MoleculeDataset(Dataset):
         self.df, self.fps, self.mds = df.iloc[use_idxs], fps[use_idxs], mds[use_idxs]
         self.smiless = self.df['smiles'].tolist()
         self.use_idxs = use_idxs
-        # Dataset Setting
+        # 记录任务信息，并加载图缓存与标签。
         self.task_names = self.df.columns.drop(['smiles']).tolist()
         self.n_tasks = len(self.task_names)
         self._pre_process()
@@ -40,6 +41,7 @@ class MoleculeDataset(Dataset):
         self.d_fps = self.fps.shape[1]
         self.d_mds = self.mds.shape[1]
     def _pre_process(self):
+        """加载预处理阶段缓存好的分子图。"""
         if not os.path.exists(self.cache_path):
             print(f"{self.cache_path} not exists, please run preprocess.py")
         else:
@@ -56,6 +58,7 @@ class MoleculeDataset(Dataset):
         return self.smiless[idx], self.graphs[idx], self.fps[idx], self.mds[idx], self.labels[idx]
 
     def task_pos_weights(self):
+        """为多标签分类任务计算正样本权重。"""
         task_pos_weights = torch.ones(self.labels.shape[1])
         num_pos = torch.sum(torch.nan_to_num(self.labels,nan=0), axis=0)
         masks = F.zerocopy_from_numpy(
@@ -64,6 +67,7 @@ class MoleculeDataset(Dataset):
         task_pos_weights[num_pos > 0] = ((num_indices - num_pos) / num_pos)[num_pos > 0]
         return task_pos_weights
     def set_mean_and_std(self, mean=None, std=None):
+        """为回归任务计算标签均值和标准差。"""
         if mean is None:
             mean = torch.from_numpy(np.nanmean(self.labels.numpy(), axis=0))
         if std is None:

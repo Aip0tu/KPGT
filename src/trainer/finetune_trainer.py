@@ -3,6 +3,7 @@ from torch import nn
 import numpy as np
 from copy import deepcopy
 class Trainer():
+    """通用微调训练器，负责训练、评估与早停控制。"""
     def __init__(self, args, optimizer, lr_scheduler, loss_fn, evaluator, result_tracker, summary_writer, device, label_mean=None, label_std=None, ddp=False, local_rank=0):
         self.args = args
         self.optimizer = optimizer
@@ -18,6 +19,7 @@ class Trainer():
         self.local_rank = local_rank
             
     def _forward_epoch(self, model, batched_data, perturb=None):
+        """执行一次前向传播，并返回预测值与标签。"""
         (smiles, g, ecfp, md, labels) = batched_data
         ecfp = ecfp.to(self.device)
         md = md.to(self.device)
@@ -27,6 +29,7 @@ class Trainer():
         return predictions, labels
 
     def train_epoch(self, model, train_loader, epoch_idx):
+        """执行一个训练 epoch。"""
         model.train()
         for batch_idx, batched_data in enumerate(train_loader):
             if self.lr_scheduler is not None:
@@ -36,6 +39,7 @@ class Trainer():
             is_labeled = (~torch.isnan(labels)).to(torch.float32)
             labels = torch.nan_to_num(labels)
             if (self.label_mean is not None) and (self.label_std is not None):
+                # 回归任务先标准化标签，再计算损失。
                 labels = (labels - self.label_mean)/self.label_std
             loss = (self.loss_fn(predictions, labels) * is_labeled).mean()
             loss.backward()
@@ -46,6 +50,7 @@ class Trainer():
 
 
     def fit(self, model, train_loader, val_loader, test_loader):
+        """训练直到达到最佳验证结果或触发早停。"""
         best_val_result,best_test_result,best_train_result = self.result_tracker.init(),self.result_tracker.init(),self.result_tracker.init()
         best_epoch = 0
         for epoch in range(1, self.args.n_epochs+1):
@@ -67,6 +72,7 @@ class Trainer():
             
         return np.mean(best_train_result), np.mean(best_val_result), np.mean(best_test_result)
     def eval(self, model, dataloader):
+        """在给定数据集上做完整评估。"""
         model.eval()
         predictions_all = []
         labels_all = []
@@ -79,6 +85,7 @@ class Trainer():
 
 
 class FLAG_Trainer(Trainer):
+    """带 FLAG 对抗扰动的微调训练器。"""
     def __init__(self, args, d_node_hidden, optimizer, lr_scheduler, loss_fn, evaluator, result_tracker, summary_writer, device, label_mean=None, label_std=None, ddp=False, local_rank=0):
         super().__init__(args, optimizer, lr_scheduler, loss_fn, evaluator, result_tracker, summary_writer, device, label_mean=label_mean, label_std=label_std, ddp=ddp, local_rank=local_rank)
         self.d_node_hidden = d_node_hidden
@@ -101,6 +108,7 @@ class FLAG_Trainer(Trainer):
             loss = (self.loss_fn(predictions, labels) * is_labeled).mean()
             loss /= self.args.flag_m
             for _ in range(self.args.flag_m - 1):
+                # 用梯度符号更新扰动，重复执行多步对抗前向。
                 loss.backward()
                 perturb_data = perturb.detach() + self.args.flag_step_size * torch.sign(perturb.grad.detach())
                 perturb.data = perturb_data.data
@@ -120,6 +128,7 @@ class FLAG_Trainer(Trainer):
 
 
 class SPRegularization(nn.Module):
+    """L2-SP 正则项，约束微调参数不要偏离预训练权重太远。"""
     def __init__(self, source_model: nn.Module, target_model: nn.Module):
         super(SPRegularization, self).__init__()
         self.target_model = target_model
@@ -138,6 +147,7 @@ class SPRegularization(nn.Module):
         return output
 
 class L2SP_Trainer(Trainer):
+    """带 L2-SP 约束的微调训练器。"""
     def __init__(self, args, optimizer, lr_scheduler, loss_fn, evaluator, result_tracker, summary_writer, device, label_mean=None, label_std=None, ddp=False, local_rank=0):
         super().__init__(args, optimizer, lr_scheduler, loss_fn, evaluator, result_tracker, summary_writer, device, label_mean=label_mean, label_std=label_std, ddp=ddp, local_rank=local_rank)
         self.args = args
@@ -154,6 +164,7 @@ class L2SP_Trainer(Trainer):
         self.local_rank = local_rank
 
     def train_epoch(self, spr, model, train_loader, epoch_idx):
+        """在监督损失之外叠加 L2-SP 正则项。"""
         model.train()
         for batch_idx, batched_data in enumerate(train_loader):
             if self.lr_scheduler is not None:
@@ -173,6 +184,7 @@ class L2SP_Trainer(Trainer):
 
 
     def fit(self, model, train_loader, val_loader, test_loader):
+        """训练带 L2-SP 约束的模型，并按验证集结果早停。"""
         source_model = deepcopy(model).to(self.device)
         spr = SPRegularization(source_model, model)
         best_val_result,best_test_result,best_train_result = self.result_tracker.init(),self.result_tracker.init(),self.result_tracker.init()

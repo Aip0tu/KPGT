@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from sklearn.metrics import f1_score
 class Trainer():
+    """预训练阶段训练器，联合优化节点、指纹和描述符任务。"""
     def __init__(self, args, optimizer, lr_scheduler, reg_loss_fn, clf_loss_fn, sl_loss_fn, reg_evaluator, clf_evaluator, result_tracker, summary_writer, device, ddp=False, local_rank=1):
         self.args = args
         self.optimizer = optimizer
@@ -18,6 +19,7 @@ class Trainer():
         self.local_rank = local_rank
         self.n_updates = 0
     def _forward_epoch(self, model, batched_data):
+        """执行一次预训练前向传播。"""
         (smiles, batched_graph, fps, mds, sl_labels, disturbed_fps, disturbed_mds) = batched_data
         batched_graph = batched_graph.to(self.device)
         fps = fps.to(self.device)
@@ -30,11 +32,13 @@ class Trainer():
         return mask_replace_keep, sl_predictions, sl_labels, fp_predictions, fps, disturbed_fps, md_predictions, mds
     
     def train_epoch(self, model, train_loader, epoch_idx):
+        """执行一个预训练 epoch。"""
         model.train()
         for batch_idx, batched_data in enumerate(train_loader):
             try:
                 self.optimizer.zero_grad()
                 mask_replace_keep, sl_predictions, sl_labels, fp_predictions, fps, disturbed_fps, md_predictions, mds = self._forward_epoch(model, batched_data)
+                # 三个预训练任务等权平均：节点恢复、指纹恢复、描述符恢复。
                 sl_loss = self.sl_loss_fn(sl_predictions, sl_labels).mean()
                 fp_loss = self.clf_loss_fn(fp_predictions, fps).mean()
                 md_loss = self.reg_loss_fn(md_predictions, mds).mean()
@@ -45,6 +49,7 @@ class Trainer():
                 self.n_updates += 1
                 self.lr_scheduler.step()
                 if self.summary_writer is not None:
+                    # 分别记录 mask/replace/keep 三种节点的恢复效果。
                     loss_mask = self.sl_loss_fn(sl_predictions.detach().cpu()[mask_replace_keep==1],sl_labels.detach().cpu()[mask_replace_keep==1]).mean()
                     loss_replace = self.sl_loss_fn(sl_predictions.detach().cpu()[mask_replace_keep==2],sl_labels.detach().cpu()[mask_replace_keep==2]).mean()
                     loss_keep = self.sl_loss_fn(sl_predictions.detach().cpu()[mask_replace_keep==3],sl_labels.detach().cpu()[mask_replace_keep==3]).mean()
@@ -78,6 +83,7 @@ class Trainer():
                 continue
 
     def fit(self, model, train_loader):
+        """循环训练直到达到设定的更新步数。"""
         for epoch in range(1, 1001):
             model.train()
             if self.ddp:
@@ -87,6 +93,7 @@ class Trainer():
                 break
 
     def save_model(self, model):
+        """保存预训练模型参数。"""
         torch.save(model.state_dict(), self.args.save_path+f"/{self.args.config}.pth")
 
     

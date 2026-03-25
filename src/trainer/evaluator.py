@@ -8,8 +8,8 @@ try:
 except ImportError:
     torch = None
 
-### Evaluator for graph classification
 class Evaluator:
+    """统一封装分类与回归任务的常用评估指标。"""
     def __init__(self, name, eval_metric, n_tasks, mean=None, std=None):
         self.name = name
         self.eval_metric = eval_metric
@@ -18,12 +18,12 @@ class Evaluator:
         self.std = std
 
     def _parse_and_check_input(self, y_true, y_pred, valid_ids=None):
-        # converting to torch.Tensor to numpy on cpu
+        # 如果输入是张量，先移动到 CPU 并转成 numpy，便于统一计算指标。
         if torch is not None and isinstance(y_true, torch.Tensor):
             y_true = y_true.detach().cpu().numpy()
         if torch is not None and isinstance(y_pred, torch.Tensor):
             y_pred = y_pred.detach().cpu().numpy()
-        ## check type
+        # 检查输入类型与形状是否合法。
         if not isinstance(y_true, np.ndarray):
             raise RuntimeError('Arguments to Evaluator need to be either numpy ndarray or torch tensor')
 
@@ -63,15 +63,15 @@ class Evaluator:
 
     def _eval_rocauc(self, y_true, y_pred):
         '''
-            compute ROC-AUC averaged across tasks
+            计算所有任务平均的 ROC-AUC
         '''
 
         rocauc_list = []
 
         for i in range(y_true.shape[1]):
-            #AUC is only defined when there is at least one positive data.
+            # AUC 需要同时存在正负样本。
             if np.sum(y_true[:,i] == 1) > 0 and np.sum(y_true[:,i] == 0) > 0:
-                # ignore nan values
+                # 忽略缺失标签。
                 is_labeled = y_true[:,i] == y_true[:,i]
                 rocauc_list.append(roc_auc_score(y_true[is_labeled,i], y_pred[is_labeled,i]))
 
@@ -82,15 +82,15 @@ class Evaluator:
 
     def _eval_rocauc_resp(self, y_true, y_pred, valid_ids=None):
         '''
-            compute ROC-AUC averaged across tasks
+            逐任务计算 ROC-AUC，并返回列表
         '''
 
         rocauc_list = []
 
         for i in range(y_true.shape[1]):
-            #AUC is only defined when there is at least one positive data.
+            # AUC 需要同时存在正负样本。
             if np.sum(y_true[:,i] == 1) > 0 and np.sum(y_true[:,i] == 0) > 0:
-                # ignore nan values
+                # 忽略缺失标签，并可选地限制到有效样本子集。
                 is_labeled = y_true[:,i] == y_true[:,i]
                 if valid_ids is not None:
                     is_labeled = np.logical_and(is_labeled, valid_ids[:, i])
@@ -105,15 +105,15 @@ class Evaluator:
 
     def _eval_ap(self, y_true, y_pred):
         '''
-            compute Average Precision (AP) averaged across tasks
+            计算所有任务平均的 AP
         '''
 
         ap_list = []
 
         for i in range(y_true.shape[1]):
-            #AUC is only defined when there is at least one positive data.
+            # AP 同样要求同时存在正负样本。
             if np.sum(y_true[:,i] == 1) > 0 and np.sum(y_true[:,i] == 0) > 0:
-                # ignore nan values
+                # 忽略缺失标签。
                 is_labeled = y_true[:,i] == y_true[:,i]
                 if len(y_true[is_labeled,i] != 0):
                     ap = average_precision_score(y_true[is_labeled,i], y_pred[is_labeled,i])
@@ -126,15 +126,15 @@ class Evaluator:
         return sum(ap_list)/len(ap_list)
     def _eval_ap_resp(self, y_true, y_pred):
         '''
-            compute Average Precision (AP) averaged across tasks
+            逐任务计算 AP，并返回列表
         '''
 
         ap_list = []
 
         for i in range(y_true.shape[1]):
-            #AUC is only defined when there is at least one positive data.
+            # AP 同样要求同时存在正负样本。
             if np.sum(y_true[:,i] == 1) > 0 and np.sum(y_true[:,i] == 0) > 0:
-                # ignore nan values
+                # 忽略缺失标签。
                 is_labeled = y_true[:,i] == y_true[:,i]
                 ap = average_precision_score(y_true[is_labeled,i], y_pred[is_labeled,i])
 
@@ -147,11 +147,11 @@ class Evaluator:
 
     def _eval_rmse(self, y_true, y_pred):
         '''
-            compute RMSE score averaged across tasks
+            计算所有任务平均的 RMSE
         '''
         rmse_list = []
         for i in range(y_true.shape[1]):
-            # ignore nan values
+            # 忽略缺失标签。
             is_labeled = y_true[:,i] == y_true[:,i]
             if (self.mean is not None) and (self.std is not None):
                 rmse_list.append(np.sqrt(((y_true[is_labeled,i] - (y_pred[is_labeled,i]*self.std[i]+self.mean[i]))**2).mean()))
@@ -161,12 +161,12 @@ class Evaluator:
     
     def _eval_mae(self, y_true, y_pred):
         '''
-            compute MAE score averaged across tasks
+            计算所有任务平均的 MAE
         '''
         mae_list = []
 
         for i in range(y_true.shape[1]):
-            # ignore nan values
+            # 忽略缺失标签。
             is_labeled = y_true[:,i] == y_true[:,i]
             if (self.mean is not None) and (self.std is not None):
                 mae_list.append(mean_absolute_error(y_true[:,i], y_pred[:,i]*self.std[i]+self.mean[i]))
@@ -176,12 +176,12 @@ class Evaluator:
         return sum(mae_list)/len(mae_list)
     def _eval_r2(self, y_true, y_pred):
         '''
-            compute R2 score averaged across tasks
+            计算每个任务的 R2
         '''
         r2_list = []
 
         for i in range(y_true.shape[1]):
-            # ignore nan values
+            # 忽略缺失标签。
             is_labeled = y_true[:,i] == y_true[:,i]
             if (self.mean is not None) and (self.std is not None):
                 r2_list.append(r2_score(y_true[is_labeled,i], y_pred[is_labeled,i]*self.std[i]+self.mean[i]))

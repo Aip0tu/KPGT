@@ -26,6 +26,7 @@ import warnings
 warnings.filterwarnings("ignore")
 local_rank = int(os.environ['LOCAL_RANK'])
 def parse_args():
+    """解析分布式预训练脚本参数。"""
     parser = argparse.ArgumentParser(description="Arguments for training LiGhT")
     parser.add_argument("--seed", type=int, default=22)
     parser.add_argument("--data_path", type=str, required=True)
@@ -37,6 +38,7 @@ def parse_args():
     args = parser.parse_args()
     return args
 def seed_worker(worker_id):
+    """为 DataLoader worker 设置随机种子。"""
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
@@ -45,6 +47,7 @@ if __name__ == '__main__':
     args = parse_args()
     config = config_dict[args.config]
     print(config)
+    # 初始化分布式训练环境，并将当前进程绑定到对应 GPU。
     torch.backends.cudnn.benchmark = True
     torch.cuda.set_device(local_rank)
     torch.distributed.init_process_group(backend='nccl')
@@ -53,10 +56,12 @@ if __name__ == '__main__':
     print(local_rank)
     val_results, test_results, train_results = [], [], []
     
+    # 构建词表、批处理器和预训练数据集。
     vocab = Vocab(N_ATOM_TYPES, N_BOND_TYPES)
     collator = Collator_pretrain(vocab, max_length=config['path_length'], n_virtual_nodes=2, candi_rate=config['candi_rate'], fp_disturb_rate=config['fp_disturb_rate'], md_disturb_rate=config['md_disturb_rate'])
     train_dataset = MoleculeDataset(root_path=args.data_path)
     train_loader = DataLoader(train_dataset, sampler=DistributedSampler(train_dataset), batch_size=config['batch_size']// args.n_devices, num_workers=args.n_threads, worker_init_fn=seed_worker, drop_last=True, collate_fn=collator)
+    # 初始化 LiGhT 模型并包装为 DDP。
     model = LiGhT(
         d_node_feats=config['d_node_feats'],
         d_edge_feats=config['d_edge_feats'],
@@ -74,6 +79,7 @@ if __name__ == '__main__':
         n_node_types=vocab.vocab_size
     ).to(device)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
+    # 配置优化器、学习率调度器与三个预训练任务的损失。
     optimizer = Adam(model.parameters(), lr=config['lr'], weight_decay=config['weight_decay'])
     lr_scheduler = PolynomialDecayLR(optimizer, warmup_updates=20000, tot_updates=200000,lr=config['lr'], end_lr=1e-9,power=1)
     reg_loss_fn = MSELoss(reduction='none')
@@ -84,6 +90,7 @@ if __name__ == '__main__':
     clf_evaluator = Evaluator("chembl29", clf_metric, train_dataset.d_fps)
     result_tracker = Result_Tracker(reg_metric)
     if local_rank == 0:
+        # 仅主进程写 TensorBoard，避免重复日志。
         summary_writer = SummaryWriter(f"tensorboard/pretrain-{args.config}", )
     else: 
         summary_writer = None

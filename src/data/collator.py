@@ -5,12 +5,14 @@ from copy import deepcopy
 from .featurizer import smiles_to_graph
 
 def preprocess_batch_light(batch_num, batch_num_target, tensor_data):
+    """把批内每张图的局部路径索引平移到批图的全局节点索引空间。"""
     batch_num = np.concatenate([[0],batch_num],axis=-1)
     cs_num = np.cumsum(batch_num)
     add_factors = np.concatenate([[cs_num[i]]*batch_num_target[i] for i in range(len(cs_num)-1)], axis=-1)
     return tensor_data + torch.from_numpy(add_factors).reshape(-1,1)
 
 class Collator_pretrain(object):
+    """预训练阶段的批处理器，负责构图、掩码和特征扰动。"""
     def __init__(
         self, 
         vocab, 
@@ -31,6 +33,7 @@ class Collator_pretrain(object):
         self.fp_disturb_rate = fp_disturb_rate
         self.md_disturb_rate = md_disturb_rate
     def bert_mask_nodes(self, g):
+        """按 BERT 风格对三元组节点做遮蔽、替换和保留。"""
         n_nodes = g.number_of_nodes()
         all_ids = np.arange(0, n_nodes, 1, dtype=np.int64)
         valid_ids = torch.where(g.ndata['vavn']<=0)[0].numpy()
@@ -56,7 +59,7 @@ class Collator_pretrain(object):
         g.ndata['mask'][keep_ids] = 3
         sl_labels = g.ndata['label'][g.ndata['mask']>=1].clone()
 
-        # Pre-replace
+        # 先为 replace 节点采样不同标签的候选三元组，再替换其原始特征。
         new_ids = np.random.choice(valid_ids, size=len(replace_ids),replace=True, p=probs)
         replace_labels = g.ndata['label'][replace_ids].numpy()
         new_labels = g.ndata['label'][new_ids].numpy()
@@ -70,6 +73,7 @@ class Collator_pretrain(object):
         g.ndata['vavn'][replace_ids] = g.ndata['vavn'][new_ids].clone()
         return sl_labels
     def disturb_fp(self, fp):
+        """随机翻转部分指纹位，构造指纹恢复任务。"""
         fp = deepcopy(fp)
         b, d = fp.shape
         fp = fp.reshape(-1)
@@ -77,6 +81,7 @@ class Collator_pretrain(object):
         fp[disturb_ids] = 1 - fp[disturb_ids]
         return fp.reshape(b,d)
     def disturb_md(self, md):
+        """随机扰动部分分子描述符，构造描述符恢复任务。"""
         md = deepcopy(md)
         b, d = md.shape
         md = md.reshape(-1)
@@ -87,6 +92,7 @@ class Collator_pretrain(object):
         return md.reshape(b,d)
     
     def __call__(self, samples):
+        """将样本列表组装为预训练所需的批图和监督信号。"""
         smiles_list, fps, mds = map(list, zip(*samples))
         graphs = []
         for smiles in smiles_list:
@@ -101,11 +107,13 @@ class Collator_pretrain(object):
         return smiles_list, batched_graph, fps, mds, sl_labels, disturbed_fps, disturbed_mds
 
 class Collator_tune(object):
+    """下游微调阶段的批处理器。"""
     def __init__(self, max_length=5, n_virtual_nodes=2, add_self_loop=True):
         self.max_length = max_length
         self.n_virtual_nodes = n_virtual_nodes
         self.add_self_loop = add_self_loop
     def __call__(self, samples):
+        """将图、指纹、描述符和标签拼成一个批次。"""
         smiles_list, graphs, fps, mds, labels = map(list, zip(*samples))
 
         batched_graph = dgl.batch(graphs)
