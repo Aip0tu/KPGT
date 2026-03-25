@@ -24,6 +24,7 @@ warnings.filterwarnings("ignore")
 def parse_args():
     """
     解析命令行参数
+
     """
     parser = argparse.ArgumentParser(description="Arguments for training LiGhT")
     parser.add_argument("--seed", type=int, default=22)
