@@ -38,6 +38,7 @@ def parse_args():
     parser.add_argument("--dataset_type", type=str, required=True, choices=["classification", 'regression'])
     parser.add_argument("--metric", type=str, required=True, choices=['rocauc', 'ap', 'acc', 'rmse', 'mae', 'r2', 'spearman', 'pearson'])
     parser.add_argument("--split", type=str, required=True)
+    parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"])
     
     # 训练超参数
     parser.add_argument("--n_epochs", type=int, default=50)
@@ -147,12 +148,15 @@ def finetune(args):
     """
     执行微调流程
     """
-    set_random_seed(args.seed)
+    use_cuda = set_random_seed(args.seed, n_threads=args.n_threads, device_preference=args.device)
     config = config_dict[args.config]
     vocab = Vocab(N_ATOM_TYPES, N_BOND_TYPES)
     g = torch.Generator()
     g.manual_seed(args.seed)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if args.device == "cuda" and not use_cuda:
+        raise RuntimeError("CUDA was requested with --device cuda, but GPU initialization failed.")
+    device = torch.device("cuda" if use_cuda else "cpu")
+    print(f"Using device: {device}")
     collator = Collator_tune(config['path_length'])
 
     # 加载训练、验证和测试集。
