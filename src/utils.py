@@ -24,7 +24,6 @@ def set_random_seed(seed=22, n_threads=16, device_preference='auto'):
     """
     random.seed(seed)
     np.random.seed(seed)
-    dgl.seed(seed)
     torch.manual_seed(seed)
     use_cuda = (
         device_preference != 'cpu'
@@ -33,6 +32,7 @@ def set_random_seed(seed=22, n_threads=16, device_preference='auto'):
     )
     if use_cuda:
         try:
+            dgl.seed(seed)
             dgl.random.seed(seed)
             torch.cuda.manual_seed(seed)
             torch.cuda.manual_seed_all(seed)

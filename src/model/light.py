@@ -303,12 +303,14 @@ class LiGhTPredictor(nn.Module):
         # 仅在对应节点类型上执行各自的预训练任务预测。
         return self.node_predictor(triplet_h[g.ndata['mask']>=1]), self.fp_predictor(triplet_h[indicators==1]), self.md_predictor(triplet_h[indicators==2])
 
-    def forward_tune(self, g, fp, md):
+    def forward_tune(self, g, fp, md, perturb=None):
         indicators = g.ndata['vavn'] # 0 表示真实三元组；-1 表示虚拟原子；>=1 表示虚拟节点
         # 下游任务不做遮蔽，直接编码整张图。
         node_h = self.node_emb(g.ndata['begin_end'], indicators)          
         edge_h = self.edge_emb(g.ndata['edge'], indicators)
         triplet_h = self.triplet_emb(node_h, edge_h, fp, md, indicators)
+        if perturb is not None:
+            triplet_h = triplet_h + perturb
         # 主干网络编码后，保留指纹节点、描述符节点和图级读出一起做预测。
         triplet_h = self.model(g, triplet_h)
         g.ndata['ht'] = triplet_h

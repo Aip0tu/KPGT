@@ -186,7 +186,8 @@ def finetune(args):
     ).to(device)
     
     # 挂载下游预测头，并移除预训练专用预测器。
-    model.load_state_dict({k.replace('module.', ''): v for k, v in torch.load(f'{args.model_path}').items()})
+    state_dict = torch.load(args.model_path, map_location=device)
+    model.load_state_dict({k.replace('module.', ''): v for k, v in state_dict.items()})
     model.predictor = get_predictor(d_input_feats=config['d_g_feats'] * 3, n_tasks=train_dataset.n_tasks, n_layers=args.n_predictor_layers, predictor_drop=args.dropout, device=device, d_hidden_feats=args.d_predictor_hidden)
     del model.md_predictor
     del model.fp_predictor
